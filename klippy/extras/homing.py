@@ -62,7 +62,9 @@ class HomingMove:
         kin = self.toolhead.get_kinematics()
         for stepper in kin.get_steppers():
             sname = stepper.get_name()
-            kin_spos[sname] += offsets.get(sname, 0) * stepper.get_step_dist()
+            # Be robust if kin_spos is missing an entry for a stepper.
+            kin_spos[sname] = kin_spos.get(sname, 0) + \
+                offsets.get(sname, 0) * stepper.get_step_dist()
         thpos = self.toolhead.get_position()
         return list(kin.calc_position(kin_spos))[:3] + thpos[3:]
     def homing_move(self, movepos, speed, probe_pos=False,
@@ -93,7 +95,8 @@ class HomingMove:
         try:
             self.toolhead.drip_move(movepos, speed, all_endstop_trigger)
         except self.printer.command_error as e:
-            error = """{"code":"key20", "msg":"Error during homing move: %s", "values": [%s]}""" % (str(e),str(e))
+            err_str = str(e)
+            error = """{"code":"key20", "msg":"Error during homing move: %s", "values": [%s]}""" % (err_str, err_str)
         # Wait for endstops to trigger
         trigger_times = {}
         move_end_print_time = self.toolhead.get_last_move_time()
@@ -190,7 +193,11 @@ class Homing:
             homepos = self._fill_coord(movepos)
             axes_d = [hp - sp for hp, sp in zip(homepos, startpos)]
             move_d = math.sqrt(sum([d*d for d in axes_d[:3]]))
-            retract_r = min(1., hi.retract_dist / move_d)
+            # Avoid division by zero if the move distance is zero.
+            if move_d == 0.:
+                retract_r = 0.
+            else:
+                retract_r = min(1., hi.retract_dist / move_d)
             retractpos = [hp - ad * retract_r
                           for hp, ad in zip(homepos, axes_d)]
             self.toolhead.move(retractpos, hi.retract_speed)
@@ -201,9 +208,10 @@ class Homing:
             hmove = HomingMove(self.printer, endstops)
             hmove.homing_move(homepos, hi.second_homing_speed)
             if hmove.check_no_movement() is not None:
+                nm = hmove.check_no_movement()
                 raise self.printer.command_error(
                     """{"code":"key23", "msg":"Endstop %s still triggered after retract", "values": ["%s"]}"""
-                    % (hmove.check_no_movement(), hmove.check_no_movement()))
+                    % (nm, nm))
         # Signal home operation complete
         self.toolhead.flush_step_generation()
         self.trigger_mcu_pos = {sp.stepper_name: sp.trig_pos
