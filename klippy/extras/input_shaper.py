@@ -137,6 +137,17 @@ class InputShaper:
         # Lookup stepper kinematics
         ffi_main, ffi_lib = chelper.get_ffi()
         steppers = kin.get_steppers()
+        # If we have previously configured steppers, restore their original
+        # kinematics before replacing them. This avoids leaking or leaving
+        # steppers configured with stale shaper objects.
+        if self.orig_stepper_kinematics:
+            for i, orig_sk in enumerate(self.orig_stepper_kinematics):
+                if i < len(steppers):
+                    try:
+                        steppers[i].set_stepper_kinematics(orig_sk)
+                    except Exception:
+                        # Best-effort restore; ignore failures and continue
+                        pass
         # Reset stepper kinematics lists to avoid duplicates on reconnect
         self.stepper_kinematics = []
         self.orig_stepper_kinematics = []
@@ -190,6 +201,12 @@ class InputShaper:
             shaper.report(gcmd)
     cmd_UPDATE_INPUT_SHAPER_help = "cmd_UPDATE_INPUT_SHAPER parameters for input shaper"
     def cmd_UPDATE_INPUT_SHAPER(self, gcmd):
+        # Ensure we're connected to a toolhead before attempting update.
+        if self.toolhead is None:
+            try:
+                self.connect()
+            except Exception as e:
+                raise gcmd.error('Not connected and failed to connect: %s' % (e,))
         # Re-apply shaper settings without reconnecting hardware
         self._update_input_shaping(error=self.printer.command_error)
 
