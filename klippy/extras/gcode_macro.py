@@ -120,15 +120,14 @@ def load_config(config):
 
 class GCodeMacro:
     def __init__(self, config):
-        if len(config.get_name().split()) > 2:
+        parts = config.get_name().split()
+        if len(parts) != 2:
             raise config.error(
-                    # "Name of section '%s' contains illegal whitespace"
-                    # % (config.get_name())
-                    """{"code":"key166", "msg": "Name of section '%s' contains illegal whitespace", "values": ["%s"]}""" % (
-                        config.get_name(), config.get_name(),
-                    )
+                """{"code":"key166", "msg": "Name of section '%s' contains illegal whitespace", "values": ["%s"]}""" % (
+                    config.get_name(), config.get_name(),
+                )
             )
-        name = config.get_name().split()[1]
+        name = parts[1]
         self.alias = name.upper()
         self.printer = printer = config.get_printer()
         gcode_macro = printer.load_object(config, 'gcode_macro')
@@ -183,7 +182,7 @@ class GCodeMacro:
             raise gcmd.error("Unknown gcode_macro variable '%s'" % (variable,))
         try:
             literal = ast.literal_eval(value)
-        except ValueError as e:
+        except (ValueError, SyntaxError) as e:
             raise gcmd.error("Unable to parse '%s' as a literal" % (value,))
         v = dict(self.variables)
         v[variable] = literal
@@ -193,14 +192,21 @@ class GCodeMacro:
             if "z_safe_pause" in variable:
                 logging.info("SET_GCODE_VARIABLE variable:%s literal:%s" % (variable, literal))
                 v_sd = self.printer.lookup_object('virtual_sdcard', None)
-                if os.path.exists(v_sd.print_file_name_path):
-                    result = {}
-                    with open(v_sd.print_file_name_path, "r") as f:
-                        result = (json.loads(f.read()))
-                        result["variable_z_safe_pause"] = literal
-                    with open(v_sd.print_file_name_path, "w") as f:
-                        f.write(json.dumps(result))
-                        f.flush()
+                # Guard if virtual_sdcard is not present or path unavailable
+                if v_sd is not None and getattr(v_sd, 'print_file_name_path', None):
+                    path = v_sd.print_file_name_path
+                    if os.path.exists(path):
+                        try:
+                            with open(path, "r") as f:
+                                data = json.loads(f.read() or "{}")
+                        except Exception:
+                            data = {}
+                        if not isinstance(data, dict):
+                            data = {}
+                        data["variable_z_safe_pause"] = literal
+                        with open(path, "w") as f:
+                            f.write(json.dumps(data))
+                            f.flush()
         except Exception as err:
             logging.error("SET_GCODE_VARIABLE save z_safe_pause err:%s" % err)
     def cmd(self, gcmd):
