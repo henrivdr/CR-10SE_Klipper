@@ -140,7 +140,7 @@ class BedMesh:
     def _get_mesh(self, web_request):
         probed_matrix = [[]]
         try:
-            probed_matrix = self.z_mesh.get_probed_matrix()
+            probed_matrix = self.z_mesh.get_probed_matrix() or [[]]
         except Exception as err:
             logging.error(err)
         web_request.send({'probed_matrix': probed_matrix})
@@ -152,7 +152,7 @@ class BedMesh:
         self.save_profile(self.pmgr.get_current_profile())
         self.load_profile(self.pmgr.get_current_profile())
         self.gcode.run_script_from_command('CXSAVE_CONFIG')
-        probed_matrix = self.z_mesh.get_probed_matrix()
+        probed_matrix = self.z_mesh.get_probed_matrix() or [[]]
         web_request.send({'probed_matrix': probed_matrix})
     def handle_connect(self):
         self.toolhead = self.printer.lookup_object('toolhead')
@@ -202,6 +202,10 @@ class BedMesh:
             return 1.
     def get_position(self):
         # Return last, non-transformed position
+        if self.toolhead is None:
+            # Not yet connected to a toolhead; return last known position
+            return list(self.last_position)
+
         if self.z_mesh is None:
             # No mesh calibrated, so send toolhead position
             self.last_position[:] = self.toolhead.get_position()
@@ -219,8 +223,13 @@ class BedMesh:
                 # Likely in the process of fading out adjustment.
                 # Because we don't yet know the gcode z position, use
                 # algebra to calculate the factor from the toolhead pos
-                factor = ((self.fade_end + self.fade_target - z) /
-                          (self.fade_dist - z_adj))
+                denom = (self.fade_dist - z_adj)
+                if abs(denom) < 1e-12:
+                    # Avoid division by zero; treat as fully faded
+                    factor = 0.
+                else:
+                    factor = ((self.fade_end + self.fade_target - z) /
+                              denom)
                 factor = constrain(factor, 0., 1.)
             final_z_adj = factor * z_adj + self.fade_target
             self.last_position[:] = [x, y, z - final_z_adj, e]
@@ -261,8 +270,8 @@ class BedMesh:
             params = self.z_mesh.get_mesh_params()
             mesh_min = (params['min_x'], params['min_y'])
             mesh_max = (params['max_x'], params['max_y'])
-            probed_matrix = self.z_mesh.get_probed_matrix()
-            mesh_matrix = self.z_mesh.get_mesh_matrix()
+            probed_matrix = self.z_mesh.get_probed_matrix() or [[]]
+            mesh_matrix = self.z_mesh.get_mesh_matrix() or [[]]
             self.status['profile_name'] = self.pmgr.get_current_profile()
             self.status['mesh_min'] = mesh_min
             self.status['mesh_max'] = mesh_max
@@ -287,7 +296,7 @@ class BedMesh:
             outdict = {
                 'mesh_min': (params['min_x'], params['min_y']),
                 'mesh_max': (params['max_x'], params['max_y']),
-                'z_positions': self.z_mesh.get_probed_matrix()}
+                'z_positions': self.z_mesh.get_probed_matrix() or [[]]}
             gcmd.respond_raw("mesh_map_output " + json.dumps(outdict))
         else:
             gcmd.respond_info("Bed has not been probed")
@@ -897,15 +906,16 @@ class ZMesh:
         if self.mesh_matrix is not None:
             return [[round(z, 6) for z in line]
                     for line in self.mesh_matrix]
-        return [[]]
+        return None
     def get_probed_matrix(self):
         if self.probed_matrix is not None:
             return [[round(z, 6) for z in line]
                     for line in self.probed_matrix]
-        return [[]]
+        return None
     def update_mesh_probed_matrix(self, probed_matrix):
-        if self.probed_matrix is not None:
-            self.probed_matrix = tuple(map(tuple, probed_matrix))
+        # Always update the probed matrix with the provided data.
+        # Accept lists of lists and normalize to tuples for immutability.
+        self.probed_matrix = tuple(map(tuple, probed_matrix))
     def get_mesh_params(self):
         return self.mesh_params
     def print_probed_matrix(self, print_func):
@@ -923,7 +933,7 @@ class ZMesh:
         if matrix is not None:
             msg = "Mesh X,Y: %d,%d\n" % (self.mesh_x_count, self.mesh_y_count)
             if move_z is not None:
-                msg += "Search Height: %d\n" % (move_z)
+                msg += "Search Height: %.4f\n" % (move_z)
             msg += "Mesh Offsets: X=%.4f, Y=%.4f\n" % (
                 self.mesh_offsets[0], self.mesh_offsets[1])
             msg += "Mesh Average: %.2f\n" % (self.avg_z)
@@ -1221,7 +1231,7 @@ class ProfileManager:
                 "Unable to save to profile [%s], the bed has not been probed"
                 % (prof_name))
             return
-        probed_matrix = z_mesh.get_probed_matrix()
+        probed_matrix = z_mesh.get_probed_matrix() or []
         mesh_params = z_mesh.get_mesh_params()
         configfile = self.printer.lookup_object('configfile')
         cfg_name = self.name + " " + prof_name
