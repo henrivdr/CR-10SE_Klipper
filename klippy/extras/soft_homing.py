@@ -1,6 +1,6 @@
 import logging, math
-SOFT_HOMING_X_ERR_CODE  = {'code':'key403', 'msg':'Homing failed due to printer shutdown,X sotf homing err', 'values':[]}
-SOFT_HOMING_Y_ERR_CODE  = {'code':'key404', 'msg':'Homing failed due to printer shutdown,Y sotf homing err', 'values':[]}
+SOFT_HOMING_X_ERR_CODE  = {'code':'key403', 'msg':'Homing failed due to printer shutdown, X soft homing error', 'values':[]}
+SOFT_HOMING_Y_ERR_CODE  = {'code':'key404', 'msg':'Homing failed due to printer shutdown, Y soft homing error', 'values':[]}
 class SoftHomingInit:
     
     def __init__(self, config):
@@ -15,25 +15,20 @@ class SoftHomingInit:
         self.diff_step = config.getint('diff_step', default=2, minval=1, maxval=10)
         self.home_cnt_max = config.getint('home_cnt_max', default=15, minval=5, maxval=30)
         self.home_mode = config.getint('home_mode', default=0, minval=0, maxval=1)
-        self.check_home_falg = 0
+        self.check_home_flag = 0
    
 
-    def ck_and_raise_error(self, err_code, vals=[]): 
-        err_code['values'] = vals
-        # self.print_msg('RAISE_ERROR', str(err_code), True)
-        err_code['msg'] = 'Shutdown due to ' + err_code['msg']
-        # self.printer.invoke_shutdown(str(err_code))
-        # while True:
-        #     self.delay_s(1.)
-        #     self.print_msg('RAISE_ERROR', str(err_code), True)
-        # raise self.printer.command_error(str(err_code))
-        self.printer.command_error(str(err_code))
+    def ck_and_raise_error(self, err_code, vals=None):
+        vals = [] if vals is None else vals
+        err = dict(err_code)
+        err['values'] = vals
+        err['msg'] = 'Shutdown due to ' + err.get('msg', '')
         gcode = self.printer.lookup_object("gcode")
-        gcode.respond_info(str(err_code))
-        pass
+        gcode.respond_info(str(err))
+        raise self.printer.command_error(str(err))
     def cmd_SOFTX_G28_CHECK_ERROR(self, gcmd):
-        self.check_home_falg = gcmd.get_int('FLAG', 0)
-        gcmd.respond_info('self.check_home_falg:%d\n' %(self.check_home_falg))
+        self.check_home_flag = gcmd.get_int('FLAG', 0)
+        gcmd.respond_info('self.check_home_flag:%d\n' % (self.check_home_flag))
         pass
     def cmd_SOFT_G28_X(self, gcmd):
         toolhead = self.printer.lookup_object('toolhead', None)
@@ -63,9 +58,9 @@ class SoftHomingInit:
         # else :
         #     check_flag = False
         check_flag = False
-        if self.check_home_falg == 1:
+        if self.check_home_flag == 1:
             check_flag = False
-        if self.check_home_falg == 2:
+        if self.check_home_flag == 2:
             check_flag = True
         gcmd.respond_info('check_flag = %d' %(check_flag))
         while(1):
@@ -79,23 +74,23 @@ class SoftHomingInit:
             gcmd.respond_info('step:%d\n' %(pos))
 
            
-            if self.home_mode == 0 : #和上一次回零对比
-                if ((pre_step - pos) < self.diff_step) & ((pre_step - pos) > -self.diff_step):
+            if self.home_mode == 0:  # Compare with the previous homing.
+                if abs(pre_step - pos) < self.diff_step:
                     break_flag = True
                     break
-            else: #和之前回零对比
-                for temp in step_sum :
-                    if ((temp - pos) < self.diff_step) & ((temp - pos) > -self.diff_step):
+            else:  # Compare with earlier homing values.
+                for temp in step_sum:
+                    if abs(temp - pos) < self.diff_step:
                         break_flag = True
                         break
             step_sum.append(pos)
             pre_step = pos
-            if(break_flag == True):
-                break 
-            if(i >= self.home_cnt_max):
-                if check_flag == True :
+            if break_flag:
+                break
+            if i >= self.home_cnt_max:
+                if check_flag:
                     self.ck_and_raise_error(SOFT_HOMING_X_ERR_CODE)
-                break 
+                break
         gcmd.respond_info("mcu: %s\n \n"
                           % (mcu_pos))
         
@@ -125,11 +120,11 @@ class SoftHomingInit:
         gcmd.respond_info('p_active:%d p_pos:%d\n' %(p_active, p_pos))
         if p_active > 0 and p_pos > 10:
             check_flag = True
-        else :
+        else:
             check_flag = False
-        if self.check_home_falg == 1:
+        if self.check_home_flag == 1:
             check_flag = False
-        if self.check_home_falg == 2:
+        if self.check_home_flag == 2:
             check_flag = True
         gcmd.respond_info('check_flag = %d' %(check_flag))
         while(1):
@@ -141,23 +136,23 @@ class SoftHomingInit:
             gcode.run_script_from_command('G28 Y')
             pos = steppers[1].get_mcu_position()
             gcmd.respond_info('%d\n' %(pos))
-            if self.home_mode == 0 :
-                if ((pre_step - pos) < self.diff_step) & ((pre_step - pos) > -self.diff_step):
+            if self.home_mode == 0:
+                if abs(pre_step - pos) < self.diff_step:
                     break_flag = True
                     break
-            else: 
-                for temp in step_sum :
-                    if ((temp - pos) < self.diff_step) & ((temp - pos) > -self.diff_step):
+            else:
+                for temp in step_sum:
+                    if abs(temp - pos) < self.diff_step:
                         break_flag = True
                         break
             step_sum.append(pos)
             pre_step = pos
-            if(break_flag == True): 
-                break 
-            if(i >= self.home_cnt_max):
-                if check_flag == True:
+            if break_flag:
+                break
+            if i >= self.home_cnt_max:
+                if check_flag:
                     self.ck_and_raise_error(SOFT_HOMING_Y_ERR_CODE)
-                break 
+                break
         gcmd.respond_info("mcu: %s\n \n"
                           % (mcu_pos))  
 
