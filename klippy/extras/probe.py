@@ -117,8 +117,9 @@ class PrinterProbe:
     def _probe(self, speed, gcmd=None):
         toolhead = self.printer.lookup_object('toolhead')
         curtime = self.printer.get_reactor().monotonic()
-        if 'z' not in toolhead.get_status(curtime)['homed_axes']:
-            raise self.printer.command_error("""{"code":"key96", "msg": "Must home before probe", "values": []}""")
+        homed_axes = toolhead.get_status(curtime).get('homed_axes', [])
+        if not any(a.upper() == 'Z' for a in homed_axes):
+            raise self.printer.command_error("Must home before probe")
         phoming = self.printer.lookup_object('homing')
         pos = toolhead.get_position()
         pos[2] = self.z_position
@@ -349,14 +350,14 @@ class ProbeEndstopWrapper:
         self.deactivate_gcode.run_gcode_from_command()
         if toolhead.get_position()[:3] != start_pos[:3]:
             raise self.printer.command_error(
-                "Toolhead moved during probe activate_gcode script")
+                "Toolhead moved during probe deactivate_gcode script")
     def lower_probe(self):
         toolhead = self.printer.lookup_object('toolhead')
         start_pos = toolhead.get_position()
         self.activate_gcode.run_gcode_from_command()
         if toolhead.get_position()[:3] != start_pos[:3]:
             raise self.printer.command_error(
-                "Toolhead moved during probe deactivate_gcode script")
+                "Toolhead moved during probe activate_gcode script")
     def multi_probe_begin(self):
         if self.stow_on_each_sample:
             return
@@ -400,7 +401,7 @@ class ProbePointsHelper:
     def minimum_points(self,n):
         if len(self.probe_points) < n:
             raise self.printer.config_error(
-                """{"code":"key98", "msg": "Need at least %d probe points for %s", "values": [%d, "%s"]}""" % (n, self.name, n, self.name))
+                "Need at least %d probe points for %s" % (n, self.name))
     def update_probe_points(self, points, min_points):
         self.probe_points = points
         self.minimum_points(min_points)
