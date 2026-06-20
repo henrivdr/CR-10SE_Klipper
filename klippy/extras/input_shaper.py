@@ -137,17 +137,21 @@ class InputShaper:
         # Lookup stepper kinematics
         ffi_main, ffi_lib = chelper.get_ffi()
         steppers = kin.get_steppers()
-        # If we have previously configured steppers, restore their original
-        # kinematics before replacing them. This avoids leaking or leaving
-        # steppers configured with stale shaper objects.
+        # If we have previously configured steppers, attempt to restore their
+        # original kinematics before replacing them. Only restore when the
+        # number of steppers matches to avoid applying wrong kinematics by
+        # index (which can happen if hardware configuration changed).
         if self.orig_stepper_kinematics:
-            for i, orig_sk in enumerate(self.orig_stepper_kinematics):
-                if i < len(steppers):
+            if len(self.orig_stepper_kinematics) == len(steppers):
+                for i, orig_sk in enumerate(self.orig_stepper_kinematics):
                     try:
                         steppers[i].set_stepper_kinematics(orig_sk)
                     except Exception:
                         # Best-effort restore; ignore failures and continue
                         pass
+            else:
+                # Stepper set changed since last connect; skip restore.
+                pass
         # Reset stepper kinematics lists to avoid duplicates on reconnect
         self.stepper_kinematics = []
         self.orig_stepper_kinematics = []
@@ -164,6 +168,10 @@ class InputShaper:
         self.old_delay = 0.
         self._update_input_shaping(error=self.printer.config_error)
     def _update_input_shaping(self, error=None):
+        if self.toolhead is None:
+            # No toolhead connected; surface a clear error to the caller.
+            raise (error or self.printer.command_error)('Input shaper not connected')
+
         self.toolhead.flush_step_generation()
         new_delay = max([s.get_step_generation_window() for s in self.shapers])
         self.toolhead.note_step_generation_scan_time(new_delay,
@@ -181,14 +189,14 @@ class InputShaper:
                         % (', '.join([s.get_name() for s in failed]), ', '.join([s.get_name() for s in failed])))
         # Store the new delay for next _update_input_shaping call
         self.old_delay = new_delay
-    def disable_shaping(self):
-        for shaper in self.shapers:
-            shaper.disable_shaping()
-        self._update_input_shaping()
-    def enable_shaping(self):
-        for shaper in self.shapers:
-            shaper.enable_shaping()
-        self._update_input_shaping()
+    # def disable_shaping(self):
+    #     for shaper in self.shapers:
+    #         shaper.disable_shaping()
+    #     self._update_input_shaping()
+    # def enable_shaping(self):
+    #     for shaper in self.shapers:
+    #         shaper.enable_shaping()
+    #     self._update_input_shaping()
     cmd_SET_INPUT_SHAPER_help = "Set cartesian parameters for input shaper"
     def cmd_SET_INPUT_SHAPER(self, gcmd):
         updated = False
@@ -201,14 +209,7 @@ class InputShaper:
             shaper.report(gcmd)
     cmd_UPDATE_INPUT_SHAPER_help = "cmd_UPDATE_INPUT_SHAPER parameters for input shaper"
     def cmd_UPDATE_INPUT_SHAPER(self, gcmd):
-        # Ensure we're connected to a toolhead before attempting update.
-        if self.toolhead is None:
-            try:
-                self.connect()
-            except Exception as e:
-                raise gcmd.error('Not connected and failed to connect: %s' % (e,))
-        # Re-apply shaper settings without reconnecting hardware
-        self._update_input_shaping(error=self.printer.command_error)
-
+        # connect() calls self._update_input_shaping()
+        self.connect()   
 def load_config(config):
     return InputShaper(config)
