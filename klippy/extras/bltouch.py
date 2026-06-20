@@ -152,8 +152,8 @@ class BLTouchEndstopWrapper:
             return
         toolhead = self.printer.lookup_object('toolhead')
         print_time = toolhead.get_last_move_time()
+        # If it's too soon to run the next test, skip testing.
         if print_time < self.next_test_time:
-            self.next_test_time = print_time + TEST_TIME
             return
         # Raise the bltouch probe and test if probe is raised
         self.sync_print_time()
