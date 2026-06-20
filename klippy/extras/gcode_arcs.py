@@ -61,7 +61,7 @@ class ArcSupport:
 
     def _cmd_inner(self, gcmd, clockwise):
         gcodestatus = self.gcode_move.get_status()
-        if not gcodestatus['absolute_coordinates']:
+        if not gcodestatus['absolute_coord']:
             raise gcmd.error("G2/G3 does not support relative move mode")
         currentPos = gcodestatus['gcode_position']
 

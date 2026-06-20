@@ -13,16 +13,22 @@ class GCodeMove:
             PRINTER_PARAM = config.getsection('gcode_macro PRINTER_PARAM')
             try:
                 self.variable_safe_z = PRINTER_PARAM.getfloat('variable_z_safe_g28')
-            except:
+            except (config.error, KeyError, ValueError):
                 section = "bltouch"
                 if config.has_section(section):
                     logging.info("with bltouch")
-                    self.variable_safe_z = PRINTER_PARAM.getfloat('variable_z_safe_g28_touch', 0.0)
+                    try:
+                        self.variable_safe_z = PRINTER_PARAM.getfloat('variable_z_safe_g28_touch', 0.0)
+                    except (config.error, KeyError, ValueError):
+                        pass
                 else:
                     logging.info("no bltouch")
-                    tmp = PRINTER_PARAM.getfloat('variable_z_safe_g28_no_touch', 0.0)
-                    if tmp is not None:
-                        self.variable_safe_z = tmp
+                    try:
+                        tmp = PRINTER_PARAM.getfloat('variable_z_safe_g28_no_touch', 0.0)
+                        if tmp is not None:
+                            self.variable_safe_z = tmp
+                    except (config.error, KeyError, ValueError):
+                        pass
         logging.info("self.variable_safe_z = %s" % self.variable_safe_z)
         printer.register_event_handler("klippy:ready", self._handle_ready)
         printer.register_event_handler("klippy:shutdown", self._handle_shutdown)
@@ -117,7 +123,7 @@ class GCodeMove:
             'speed_factor': self._get_gcode_speed_override(),
             'speed': self._get_gcode_speed(),
             'extrude_factor': self.extrude_factor,
-            'absolute_coordinates': self.absolute_coord,
+            'absolute_coord': self.absolute_coord,
             'absolute_extrude': self.absolute_extrude,
             'homing_origin': self.Coord(*self.homing_position),
             'position': self.Coord(*self.last_position),
@@ -142,7 +148,7 @@ class GCodeMove:
                         self.last_position[pos] = v + self.base_position[pos]
             if 'E' in params:
                 v = float(params['E']) * self.extrude_factor
-                if not self.absolute_coord or not self.absolute_extrude:
+                if not self.absolute_extrude:
                     # value relative to position of last move
                     self.last_position[3] += v
                 else:
@@ -151,12 +157,10 @@ class GCodeMove:
             if 'F' in params:
                 gcode_speed = float(params['F'])
                 if gcode_speed <= 0.:
-                    raise gcmd.error("""{"code":"key272": "msg":"Invalid speed in '%s'", "values":["%s"]}"""
-                                     % (gcmd.get_commandline(),gcmd.get_commandline()))
+                    raise gcmd.error('{"code":"key272","msg":"Invalid speed in \"' + gcmd.get_commandline() + '\""}')
                 self.speed = gcode_speed * self.speed_factor
         except ValueError as e:
-            raise gcmd.error("""{"code":"key273": "msg":"Unable to parse move '%s'", "values":["%s"]}"""
-                             % (gcmd.get_commandline(),gcmd.get_commandline()))
+            raise gcmd.error('{"code":"key273","msg":"Unable to parse move \"' + gcmd.get_commandline() + '\""}')
         self.move_with_transform(self.last_position, self.speed)
     # G-Code coordinate manipulation
     def cmd_G20(self, gcmd):
@@ -390,8 +394,9 @@ class GCodeMove:
             self.absolute_extrude = state['absolute_extrude']
             gcode.run_script_from_command("M221 S%s" % int(state['extrude_factor']*100))
             try:
-                if os.path.exists(gcode.exclude_object_info):
-                    with open(gcode.exclude_object_info, "r") as f:
+                exclude_info = getattr(gcode, 'exclude_object_info', None)
+                if exclude_info and os.path.exists(exclude_info):
+                    with open(exclude_info, "r") as f:
                         exclude_object_cmds = json.loads(f.read())
                         EXCLUDE_OBJECT_DEFINE = exclude_object_cmds.get("EXCLUDE_OBJECT_DEFINE", [])
                         EXCLUDE_OBJECT = exclude_object_cmds.get("EXCLUDE_OBJECT", [])
@@ -444,7 +449,7 @@ class GCodeMove:
     def cmd_GET_POSITION(self, gcmd):
         toolhead = self.printer.lookup_object('toolhead', None)
         if toolhead is None:
-            raise gcmd.error("""{"code": "key283", "msg": ""Printer not ready"}""")
+            raise gcmd.error('{"code":"key283","msg":"Printer not ready"}')
         kin = toolhead.get_kinematics()
         steppers = kin.get_steppers()
         mcu_pos = " ".join(["%s:%d" % (s.get_name(), s.get_mcu_position())
@@ -475,7 +480,7 @@ class GCodeMove:
     def cmd_SET_POSITION(self, gcmd):
         toolhead = self.printer.lookup_object('toolhead', None)
         if toolhead is None:
-            raise gcmd.error("""{"code": "key283", "msg": ""Printer not ready"}""")
+            raise gcmd.error('{"code":"key283","msg":"Printer not ready"}')
         position = toolhead.get_position()
         x = position[0]
         y = position[1]
