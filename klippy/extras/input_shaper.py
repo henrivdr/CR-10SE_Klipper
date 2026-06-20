@@ -49,12 +49,14 @@ class InputShaperParams:
         self.shaper_freq = shaper_freq
     def get_shaper(self, shaper_type=None, shaper_freq=None,
                    damping_ratio=None, error=None):
-        if not self.shaper_freq:
+        use_freq = shaper_freq if shaper_freq is not None else self.shaper_freq
+        use_damping = damping_ratio if damping_ratio is not None else self.damping_ratio
+        if not use_freq:
             A, T = shaper_defs.get_none_shaper()
         else:
             A, T = shaper_defs.init_shaper(shaper_type or self.shaper_type,
-                                           shaper_freq or self.shaper_freq,
-                                           damping_ratio or self.damping_ratio,
+                                           use_freq,
+                                           use_damping,
                                            error=error)
         return len(A), A, T
     def get_status(self):
@@ -84,8 +86,9 @@ class AxisInputShaper:
                 sk, self.axis.encode(), self.n, self.A, self.T) == 0
         if not success:
             self.disable_shaping()
-            ffi_lib.input_shaper_set_shaper_params(
-                    sk, self.axis.encode(), self.n, self.A, self.T)
+            # Retry with shaping disabled
+            success = ffi_lib.input_shaper_set_shaper_params(
+                    sk, self.axis.encode(), self.n, self.A, self.T) == 0
         return success
     def is_enabled(self):
         return self.n > 0
@@ -134,6 +137,9 @@ class InputShaper:
         # Lookup stepper kinematics
         ffi_main, ffi_lib = chelper.get_ffi()
         steppers = kin.get_steppers()
+        # Reset stepper kinematics lists to avoid duplicates on reconnect
+        self.stepper_kinematics = []
+        self.orig_stepper_kinematics = []
         for s in steppers:
             sk = ffi_main.gc(ffi_lib.input_shaper_alloc(), ffi_lib.free)
             orig_sk = s.set_stepper_kinematics(sk)
@@ -143,7 +149,7 @@ class InputShaper:
                 continue
             self.stepper_kinematics.append(sk)
             self.orig_stepper_kinematics.append(orig_sk)
-       # Configure initial values
+        # Configure initial values
         self.old_delay = 0.
         self._update_input_shaping(error=self.printer.config_error)
     def _update_input_shaping(self, error=None):
@@ -162,6 +168,8 @@ class InputShaper:
             error = error or self.printer.command_error
             raise error("""{"code":"key25", "msg":"Failed to configure shaper(s) %s with given parameters", "values": ["%s"]}"""
                         % (', '.join([s.get_name() for s in failed]), ', '.join([s.get_name() for s in failed])))
+        # Store the new delay for next _update_input_shaping call
+        self.old_delay = new_delay
     def disable_shaping(self):
         for shaper in self.shapers:
             shaper.disable_shaping()
@@ -182,7 +190,8 @@ class InputShaper:
             shaper.report(gcmd)
     cmd_UPDATE_INPUT_SHAPER_help = "cmd_UPDATE_INPUT_SHAPER parameters for input shaper"
     def cmd_UPDATE_INPUT_SHAPER(self, gcmd):
-        self.connect()
+        # Re-apply shaper settings without reconnecting hardware
+        self._update_input_shaping(error=self.printer.command_error)
 
 def load_config(config):
     return InputShaper(config)
