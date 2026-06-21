@@ -59,9 +59,11 @@
                                     if(0 != __delay){                   \
                                         RCU_CFG0 |= RCU_AHB_CKSYS_DIV2; \
                                         for(i=0; i<__delay; i++){       \
+                                            __asm volatile ("nop");    \
                                         }                               \
                                         RCU_CFG0 |= RCU_AHB_CKSYS_DIV4; \
                                         for(i=0; i<__delay; i++){       \
+                                            __asm volatile ("nop");    \
                                         }                               \
                                     }                                   \
                                 }while(0)
@@ -918,7 +920,11 @@ void SystemCoreClockUpdate(void)
     uint32_t predv0, predv1, pll1mf;
 #endif /* GD32F30X_CL */
 
-    sws = GET_BITS(RCU_CFG0, 2, 3);
+    /* cache config registers to reduce repeated volatile reads */
+    uint32_t cfg0 = RCU_CFG0;
+    uint32_t cfg1 = RCU_CFG1;
+
+    sws = GET_BITS(cfg0, 2, 3);
     switch(sws){
     /* IRC8M is selected as CK_SYS */
     case SEL_IRC8M:
@@ -931,12 +937,12 @@ void SystemCoreClockUpdate(void)
     /* PLL is selected as CK_SYS */
     case SEL_PLL:
         /* PLL clock source selection, HXTAL, IRC48M or IRC8M/2 */
-        pllsel = (RCU_CFG0 & RCU_CFG0_PLLSEL);
+        pllsel = (cfg0 & RCU_CFG0_PLLSEL);
 
         if(RCU_PLLSRC_HXTAL_IRC48M == pllsel){
             /* PLL clock source is HXTAL or IRC48M */
-            pllpresel = (RCU_CFG1 & RCU_CFG1_PLLPRESEL);
-            
+            pllpresel = (cfg1 & RCU_CFG1_PLLPRESEL);
+
             if(RCU_PLLPRESRC_HXTAL == pllpresel){
                 /* PLL clock source is HXTAL */
                 ck_src = HXTAL_VALUE;
@@ -946,23 +952,23 @@ void SystemCoreClockUpdate(void)
             }
 
 #if (defined(GD32F30X_HD) || defined(GD32F30X_XD))
-            predv0sel = (RCU_CFG0 & RCU_CFG0_PREDV0);
+            predv0sel = (cfg0 & RCU_CFG0_PREDV0);
             /* PREDV0 input source clock divided by 2 */
             if(RCU_CFG0_PREDV0 == predv0sel){
                 ck_src /= 2U;
             }
 #elif defined(GD32F30X_CL)
-            predv0sel = (RCU_CFG1 & RCU_CFG1_PREDV0SEL);
+            predv0sel = (cfg1 & RCU_CFG1_PREDV0SEL);
             /* source clock use PLL1 */
             if(RCU_PREDV0SRC_CKPLL1 == predv0sel){
-                predv1 = ((RCU_CFG1 & RCU_CFG1_PREDV1) >> 4) + 1U;
-                pll1mf = ((RCU_CFG1 & RCU_CFG1_PLL1MF) >> 8) + 2U;
+                predv1 = ((cfg1 & RCU_CFG1_PREDV1) >> 4) + 1U;
+                pll1mf = ((cfg1 & RCU_CFG1_PLL1MF) >> 8) + 2U;
                 if(17U == pll1mf){
                     pll1mf = 20U;
                 }
                 ck_src = (ck_src / predv1) * pll1mf;
             }
-            predv0 = (RCU_CFG1 & RCU_CFG1_PREDV0) + 1U;
+            predv0 = (cfg1 & RCU_CFG1_PREDV0) + 1U;
             ck_src /= predv0;
 #endif /* GD32F30X_HD and GD32F30X_XD */
         }else{
@@ -971,12 +977,12 @@ void SystemCoreClockUpdate(void)
         }
 
         /* PLL multiplication factor */
-        pllmf = GET_BITS(RCU_CFG0, 18, 21);
+        pllmf = GET_BITS(cfg0, 18, 21);
 
-        if((RCU_CFG0 & RCU_CFG0_PLLMF_4)){
+        if((cfg0 & RCU_CFG0_PLLMF_4)){
             pllmf |= 0x10U;
         }
-        if((RCU_CFG0 & RCU_CFG0_PLLMF_5)){
+        if((cfg0 & RCU_CFG0_PLLMF_5)){
             pllmf |= 0x20U;
         }
 
@@ -1002,7 +1008,7 @@ void SystemCoreClockUpdate(void)
     }
 
     /* calculate AHB clock frequency */
-    idx = GET_BITS(RCU_CFG0, 4, 7);
+    idx = GET_BITS(cfg0, 4, 7);
     clk_exp = ahb_exp[idx];
     SystemCoreClock = SystemCoreClock >> clk_exp;
 }
