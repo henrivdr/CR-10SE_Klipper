@@ -82,12 +82,15 @@ class CartKinematics:
         for axis in homing_state.get_axes():
             if axis == self.dual_carriage_axis:
                 dc1, dc2 = self.dual_carriage_rails
-                altc = self.rails[axis] == dc2
+                # Remember which carriage index is currently active
+                # Use identity check and explicit integer index for clarity.
+                active_index = 1 if (self.rails[axis] is dc2) else 0
                 self._activate_carriage(0)
                 self._home_axis(homing_state, axis, dc1)
                 self._activate_carriage(1)
                 self._home_axis(homing_state, axis, dc2)
-                self._activate_carriage(altc)
+                # Restore the originally active carriage by index.
+                self._activate_carriage(active_index)
             else:
                 self._home_axis(homing_state, axis, self.rails[axis])
     def _motor_off(self, print_time):
@@ -112,7 +115,16 @@ class CartKinematics:
             return
         # Move with Z - update velocity and accel for slower Z axis
         self._check_endstops(move)
-        z_ratio = move.move_d / abs(move.axes_d[2])
+        # Defensively compute Z move distance in case `move.move_d` is
+        # not present on some move implementations.
+        z_d = getattr(move, 'move_d', None)
+        if z_d is None:
+            try:
+                z_d = abs(move.end_pos[2] - move.start_pos[2])
+            except Exception:
+                z_d = 0.0
+        denom = abs(move.axes_d[2]) if move.axes_d[2] != 0 else 1.0
+        z_ratio = (z_d / denom) if denom != 0 else 0.0
         move.limit_speed(
             self.max_z_velocity * z_ratio, self.max_z_accel * z_ratio)
     def get_status(self, eventtime):
