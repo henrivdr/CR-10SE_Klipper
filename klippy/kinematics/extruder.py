@@ -43,7 +43,7 @@ class ExtruderStepper:
         gcode.register_mux_command("SYNC_STEPPER_TO_EXTRUDER", "STEPPER",
                                    self.name, self.cmd_SYNC_STEPPER_TO_EXTRUDER,
                                    desc=self.cmd_SYNC_STEPPER_TO_EXTRUDER_help)
-    def _handle_connect(self):
+    def _handle_connect(self, *args, **kwargs):
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.register_step_generator(self.stepper.generate_steps)
         self._set_pressure_advance(self.config_pa, self.config_smooth_time)
@@ -86,7 +86,8 @@ class ExtruderStepper:
         if extruder.extruder_stepper is None:
             raise gcmd.error("Active extruder does not have a stepper")
         strapq = extruder.extruder_stepper.stepper.get_trapq()
-        if strapq is not extruder.get_trapq():
+        # Use value-equality instead of identity to compare trapq handles.
+        if strapq != extruder.get_trapq():
             raise gcmd.error("Unable to infer active extruder stepper")
         extruder.extruder_stepper.cmd_SET_PRESSURE_ADVANCE(gcmd)
     def cmd_SET_PRESSURE_ADVANCE(self, gcmd):
@@ -234,6 +235,10 @@ class PrinterExtruder:
                     "Extrude only move too long (%.3fmm vs %.3fmm)\n"
                     "See the 'max_extrude_only_distance' config"
                     " option for details" % (move.axes_d[3], self.max_e_dist))
+            # Guard against invalid extrusion ratio to avoid division-by-zero
+            if abs(axis_r) < 1e-12:
+                raise self.printer.command_error(
+                    "Invalid extrusion ratio (zero) for extrude-only move")
             inv_extrude_r = 1. / abs(axis_r)
             move.limit_speed(self.max_e_velocity * inv_extrude_r,
                              self.max_e_accel * inv_extrude_r)
@@ -251,7 +256,10 @@ class PrinterExtruder:
     def calc_junction(self, prev_move, move):
         diff_r = move.axes_r[3] - prev_move.axes_r[3]
         if diff_r:
-            return (self.instant_corner_v / abs(diff_r))**2
+            # Avoid division by an extremely small number which can produce
+            # runaway values; clamp denominator to a small epsilon.
+            den = max(abs(diff_r), 1e-6)
+            return (self.instant_corner_v / den)**2
         return move.max_cruise_v2
     def move(self, print_time, move):
         axis_r = move.axes_r[3]
