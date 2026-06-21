@@ -82,17 +82,6 @@ target-y += $(OUT)klipper.bin
 #	@echo " Creating hex file $@"
 #	$(Q)$(OBJCOPY) -l binary -O ihex $< $@
 
-ifeq ($(CONFIG_MACH_GD32F30X),y)
-$(OUT)src/prtouch_v2.o:
-	$(Q)cp src/prtouch_v2_cm4.o $@
-endif
-
-ifeq ($(CONFIG_MACH_GD32E23X),y)
-$(OUT)src/prtouch_v2.o: 
-	$(Q)cp src/prtouch_v2_cm23.o $@
-endif
-
-
 $(OUT)klipper.bin: $(OUT)klipper.elf $(OUT)hostCrc16.elf
 	@echo "  Creating bin file $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
@@ -104,3 +93,10 @@ $(OUT)klipper.bin: $(OUT)klipper.elf $(OUT)hostCrc16.elf
 flash: $(OUT)klipper.bin
 	@echo "  Flashing $< to $(FLASH_DEVICE)"
 	$(Q)$(PYTHON) ./scripts/flash_usb.py -t $(CONFIG_MCU) -d "$(FLASH_DEVICE)" $(if $(NOSUDO),--no-sudo) $(OUT)klipper.bin
+
+# If board-specific prtouch source exists, compile it into the top-level object
+ifneq ($(wildcard src/gd32/prtouch_v2.c),)
+$(OUT)src/prtouch_v2.o: src/gd32/prtouch_v2.c $(OUT)autoconf.h
+	@echo "  Compiling prtouch_v2 from source (gd32)"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
+endif
