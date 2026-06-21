@@ -193,18 +193,20 @@ class Printer:
             self._read_config()
             self.send_event("klippy:mcu_identify")
             for cb in self.event_handlers.get("klippy:connect", []):
-                if self.state_message is not message_startup:
+                if self.state_message != message_startup:
                     return
                 cb()
         except (self.config_error, pins.error) as e:
-            # logging.exception("Config error")^M
             logging.error(e)
-            # self._set_state("%s\n%s" % (str(e), message_restart))^M
             if '{"code":' in str(e):
                 try:
                     import json
-                    tmp_state = eval(str(e))
-                    tmp_state["msg"] = tmp_state["msg"] + "\n" + message_restart
+                    try:
+                        tmp_state = json.loads(str(e))
+                    except Exception:
+                        logging.exception("Unable to parse JSON from config error")
+                        tmp_state = {"code": "unknown", "msg": str(e)}
+                    tmp_state["msg"] = tmp_state.get("msg", "") + "\n" + message_restart
                     self._set_state(json.dumps(tmp_state))
                 except Exception as e:
                     logging.exception(e)
@@ -252,7 +254,7 @@ class Printer:
         try:
             self._set_state(message_ready)
             for cb in self.event_handlers.get("klippy:ready", []):
-                if self.state_message is not message_ready:
+                if self.state_message != message_ready:
                     return
                 cb()
         except Exception as e:
